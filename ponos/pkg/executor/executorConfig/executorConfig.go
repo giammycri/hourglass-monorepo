@@ -3,9 +3,10 @@ package executorConfig
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/Layr-Labs/hourglass-monorepo/ponos/pkg/auth"
 	"slices"
 	"time"
+
+	"github.com/Layr-Labs/hourglass-monorepo/ponos/pkg/auth"
 
 	"github.com/Layr-Labs/hourglass-monorepo/ponos/pkg/config"
 	"github.com/spf13/viper"
@@ -152,12 +153,13 @@ func (apc *AvsPerformerKubernetesConfig) Validate() error {
 }
 
 type AvsPerformerConfig struct {
-	Image          *PerformerImage
-	ProcessType    string
-	AvsAddress     string
-	Envs           []config.AVSPerformerEnv
-	DeploymentMode DeploymentMode                `json:"deploymentMode" yaml:"deploymentMode"`
-	Kubernetes     *AvsPerformerKubernetesConfig `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
+	Image           *PerformerImage
+	ProcessType     string
+	AvsAddress      string
+	OperatorAddress string
+	Envs            []config.AVSPerformerEnv
+	DeploymentMode  DeploymentMode                `json:"deploymentMode" yaml:"deploymentMode"`
+	Kubernetes      *AvsPerformerKubernetesConfig `json:"kubernetes,omitempty" yaml:"kubernetes,omitempty"`
 }
 
 func (ap *AvsPerformerConfig) Validate() error {

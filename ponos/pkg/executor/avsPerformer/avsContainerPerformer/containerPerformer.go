@@ -133,7 +133,19 @@ func (aps *AvsContainerPerformer) cleanupFailedContainer(containerID string, fai
 
 // generatePerformerID generates a unique performer ID
 func (aps *AvsContainerPerformer) generatePerformerID() string {
-	return fmt.Sprintf("performer-%s-%s", aps.config.AvsAddress, uuid.New().String())
+	// Estrai ultimi 8 caratteri dell'operator address per unicità
+	operatorSuffix := aps.config.OperatorAddress
+	if len(operatorSuffix) > 8 {
+		operatorSuffix = operatorSuffix[len(operatorSuffix)-8:]
+	}
+
+	// Estrai ultimi 6 caratteri dell'AVS address
+	avsSuffix := aps.config.AvsAddress
+	if len(avsSuffix) > 6 {
+		avsSuffix = avsSuffix[len(avsSuffix)-6:]
+	}
+
+	return fmt.Sprintf("performer-%s-%s-%s", avsSuffix, operatorSuffix, uuid.New().String())
 }
 
 func (aps *AvsContainerPerformer) buildDockerEnvsFromConfig(image avsPerformer.PerformerImage) []string {
@@ -258,12 +270,13 @@ func (aps *AvsContainerPerformer) Initialize(ctx context.Context) error {
 	}
 
 	// Create and start container
+	performerID := aps.generatePerformerID()
 	performerContainer, err := aps.createAndStartContainer(
 		ctx,
-		aps.config.AvsAddress,
+		performerID,
 		aps.config.Image,
 		containerManager.CreateDefaultContainerConfig(
-			aps.config.AvsAddress,
+			performerID,
 			aps.config.Image.Repository,
 			aps.config.Image.Tag,
 			aps.config.Image.Digest,
@@ -454,12 +467,13 @@ func (aps *AvsContainerPerformer) recreateContainer(ctx context.Context, targetC
 	)
 
 	// Create and start new container
+	performerID := aps.generatePerformerID()
 	newContainer, err := aps.createAndStartContainer(
 		ctx,
-		aps.config.AvsAddress,
+		performerID,
 		targetContainer.image,
 		containerManager.CreateDefaultContainerConfig(
-			aps.config.AvsAddress,
+			performerID,
 			targetContainer.image.Repository,
 			targetContainer.image.Tag,
 			targetContainer.image.Digest,
@@ -597,12 +611,13 @@ func (aps *AvsContainerPerformer) CreatePerformer(
 	}
 
 	// Create the new container instance
+	performerID := aps.generatePerformerID()
 	newContainer, err := aps.createAndStartContainer(
 		ctx,
-		aps.config.AvsAddress,
+		performerID,
 		image,
 		containerManager.CreateDefaultContainerConfig(
-			aps.config.AvsAddress,
+			performerID,
 			image.Repository,
 			image.Tag,
 			image.Digest,

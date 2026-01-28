@@ -1,0 +1,26 @@
+FROM golang:1.23-bookworm AS builder
+
+WORKDIR /build
+COPY . .
+
+# Build di TUTTI i binari necessari
+RUN go build -o executor ./cmd/executor
+RUN go build -o aggregator ./cmd/aggregator
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && \
+    apt-get install -y ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Installa Docker CLI
+RUN apt-get update && \
+    apt-get install -y docker.io && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copia ENTRAMBI i binari
+COPY --from=builder /build/executor /usr/local/bin/executor
+COPY --from=builder /build/aggregator /usr/local/bin/aggregator
+
+# Entrypoint dinamico - esegue il comando passato
+ENTRYPOINT []
