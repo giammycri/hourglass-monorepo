@@ -16,6 +16,7 @@ import (
 	"github.com/Layr-Labs/hourglass-monorepo/ponos/pkg/contractCaller"
 	"github.com/Layr-Labs/hourglass-monorepo/ponos/pkg/contractStore"
 	"github.com/Layr-Labs/hourglass-monorepo/ponos/pkg/operatorManager"
+	"github.com/Layr-Labs/hourglass-monorepo/ponos/pkg/peering"
 	"github.com/Layr-Labs/hourglass-monorepo/ponos/pkg/signer"
 	"github.com/Layr-Labs/hourglass-monorepo/ponos/pkg/signing/aggregation"
 	"github.com/Layr-Labs/hourglass-monorepo/ponos/pkg/taskSession"
@@ -87,6 +88,10 @@ type AvsExecutionManager struct {
 	store storage.AggregatorStore
 
 	avsConfigMutex sync.Mutex
+
+	// ⭐ AGGIUNGI QUESTI DUE CAMPI PER ROUND-ROBIN
+	executorIndex map[string]int // Chiave: "avsAddress-operatorSetId"
+	executorMutex sync.Mutex     // Lock per thread-safety
 }
 
 func NewAvsExecutionManager(
@@ -131,6 +136,74 @@ func NewAvsExecutionManager(
 		taskQueue:            taskQueue,
 	}
 	return manager, nil
+}
+
+// selectExecutorRoundRobin seleziona un executor dalla lista in modo round-robin
+func (em *AvsExecutionManager) selectExecutorRoundRobin(
+	avsAddress string,
+	operatorSetId uint32,
+	peerWeight *operatorManager.PeerWeight,
+) *operatorManager.PeerWeight {
+	if peerWeight == nil || len(peerWeight.Operators) == 0 {
+		return nil
+	}
+
+	// Se c'è solo un operator, restituiscilo direttamente
+	if len(peerWeight.Operators) == 1 {
+		return peerWeight
+	}
+
+	// Crea una chiave unica per AVS + OperatorSet
+	key := fmt.Sprintf("%s-%d", avsAddress, operatorSetId)
+
+	em.executorMutex.Lock()
+	defer em.executorMutex.Unlock()
+
+	// Inizializza la mappa se non esiste
+	if em.executorIndex == nil {
+		em.executorIndex = make(map[string]int)
+	}
+
+	// Ottieni l'indice corrente per questo AVS+OperatorSet
+	currentIndex := em.executorIndex[key]
+
+	// Seleziona l'operator in base all'indice round-robin
+	selectedOperator := peerWeight.Operators[currentIndex]
+
+	// Aggiorna l'indice per il prossimo task (round-robin)
+	em.executorIndex[key] = (currentIndex + 1) % len(peerWeight.Operators)
+
+	// Ottieni il socket per questo operator set
+	socket, err := selectedOperator.GetSocketForOperatorSet(operatorSetId)
+	if err != nil {
+		em.logger.Warn("Failed to get socket for operator",
+			zap.String("operatorAddress", selectedOperator.OperatorAddress),
+			zap.Error(err),
+		)
+		socket = "unknown"
+	}
+
+	em.logger.Info("Selected executor via round-robin",
+		zap.String("avsAddress", avsAddress),
+		zap.Uint32("operatorSetId", operatorSetId),
+		zap.Int("executorIndex", currentIndex),
+		zap.Int("totalExecutors", len(peerWeight.Operators)),
+		zap.String("selectedOperatorAddress", selectedOperator.OperatorAddress),
+		zap.String("selectedOperatorSocket", socket),
+	)
+
+	// Crea un nuovo PeerWeight con SOLO l'executor selezionato
+	// Mantieni tutti gli altri campi originali per la verifica on-chain
+	return &operatorManager.PeerWeight{
+		ChainId:                peerWeight.ChainId,
+		OperatorSetId:          peerWeight.OperatorSetId,
+		RootReferenceTimestamp: peerWeight.RootReferenceTimestamp,
+		Weights:                peerWeight.Weights,
+		Operators:              []*peering.OperatorPeerInfo{selectedOperator},
+		CurveType:              peerWeight.CurveType,
+		OperatorInfoTreeRoot:   peerWeight.OperatorInfoTreeRoot,
+		OperatorInfos:          peerWeight.OperatorInfos,
+	}
 }
 
 func (em *AvsExecutionManager) Start(ctx context.Context) error {
@@ -396,6 +469,11 @@ func (em *AvsExecutionManager) handleTask(ctx context.Context, task *types.Task)
 		return fmt.Errorf("failed to get operator peers and weights: %w", err)
 	}
 
+	em.logger.Info("DEBUG: Operators returned from GetExecutorPeersAndWeightsForTask",
+		zap.Int("count", len(operatorPeersWeight.Operators)),
+		zap.Any("operators", operatorPeersWeight.Operators),
+	)
+
 	if operatorPeersWeight == nil || len(operatorPeersWeight.Operators) == 0 {
 		em.logger.Sugar().Errorw("No valid operators available for task",
 			zap.String("taskId", task.TaskId),
@@ -408,6 +486,23 @@ func (em *AvsExecutionManager) handleTask(ctx context.Context, task *types.Task)
 			task.TaskId,
 			task.OperatorSetId,
 		)
+	}
+
+	// ⭐ ROUND-ROBIN: Seleziona UN SOLO executor invece di usarli tutti
+	em.logger.Info("Total executors available for task",
+		zap.Int("count", len(operatorPeersWeight.Operators)),
+		zap.String("taskId", task.TaskId),
+	)
+
+	// Seleziona UN executor in round-robin
+	operatorPeersWeight = em.selectExecutorRoundRobin(
+		task.AVSAddress,
+		task.OperatorSetId,
+		operatorPeersWeight,
+	)
+
+	if operatorPeersWeight == nil {
+		return fmt.Errorf("failed to select executor for task %s", task.TaskId)
 	}
 
 	opsetCurveType, err := em.operatorManager.GetCurveTypeForOperatorSet(task.AVSAddress, task.OperatorSetId, task.L1ReferenceBlockNumber)

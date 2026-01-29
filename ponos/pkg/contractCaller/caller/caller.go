@@ -1204,7 +1204,7 @@ func (cc *ContractCaller) SetupTaskMailboxForAvs(
 			TaskSLA:  big.NewInt(60),
 			Consensus: ITaskMailbox.ITaskMailboxTypesConsensus{
 				ConsensusType: 1,
-				Value:         util.AbiEncodeUint16(6667), // 66.67% consensus threshold
+				Value:         util.AbiEncodeUint16(1000), // 66.67% consensus threshold
 			},
 			TaskMetadata: nil,
 		}
